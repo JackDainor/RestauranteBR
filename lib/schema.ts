@@ -44,8 +44,6 @@ export async function ensureSchema() {
       created_at timestamptz NOT NULL DEFAULT now()
     )
   `;
-
-  // migrate sold_out if table existed without it
   await db`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS sold_out boolean NOT NULL DEFAULT false`;
 
   await db`
@@ -68,33 +66,32 @@ export async function ensureSchema() {
       updated_at timestamptz NOT NULL DEFAULT now()
     )
   `;
-
   await db`ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment text NOT NULL DEFAULT 'delivery'`;
   await db`ALTER TABLE orders ALTER COLUMN address_text DROP NOT NULL`;
 
   const cats = await db`SELECT id FROM menu_categories LIMIT 1`;
   if (!cats.length) {
     await db`INSERT INTO menu_categories (name, sort_order) VALUES
-      ('Hambúrgueres', 1),
-      ('Pizzas', 2),
-      ('Bebidas', 3),
-      ('Acompanhamentos', 4)`;
+      ('Pratos', 1),
+      ('Frango', 2),
+      ('Bebidas', 3)`;
     const c = await db`SELECT id, name FROM menu_categories ORDER BY sort_order`;
     const m: Record<string, number> = {};
     for (const row of c as any[]) m[row.name] = row.id;
     await db`
       INSERT INTO menu_items (category_id, name, description, price, sort_order) VALUES
-      (${m['Hambúrgueres']}, 'Classic Burger', 'Blend 180g, queijo, alface, tomate, molho da casa', 29.90, 1),
-      (${m['Hambúrgueres']}, 'Bacon Smash', 'Dois smashes, cheddar e bacon crocante', 34.90, 2),
-      (${m['Hambúrgueres']}, 'Burger BBQ', 'Blend, onion rings e barbecue', 36.90, 3),
-      (${m['Pizzas']}, 'Mussarela G', 'Molho, mussarela e orégano', 49.90, 1),
-      (${m['Pizzas']}, 'Calabresa G', 'Calabresa fatiada e cebola', 54.90, 2),
-      (${m['Pizzas']}, 'Frango c/ Catupiry G', 'Frango desfiado e catupiry', 59.90, 3),
-      (${m['Bebidas']}, 'Refrigerante Lata', '350ml', 7.00, 1),
-      (${m['Bebidas']}, 'Refrigerante 2L', 'Diversos sabores', 14.00, 2),
-      (${m['Bebidas']}, 'Suco Natural', 'Laranja ou limão 500ml', 12.00, 3),
-      (${m['Acompanhamentos']}, 'Batata Frita G', 'Crocante com tempero', 22.00, 1),
-      (${m['Acompanhamentos']}, 'Onion Rings', 'Anéis empanados', 24.00, 2)
+      (${m['Pratos']}, 'Pique Macho', 'Carne, salsicha, ovo, batata frita e molhos — porção generosa', 48.90, 1),
+      (${m['Pratos']}, 'Pique Macho Família', 'Porção grande para compartilhar', 79.90, 2),
+      (${m['Frango']}, 'Pollo al Spiedo', 'Frango no espeto, crocante por fora e suculento', 42.90, 1),
+      (${m['Frango']}, 'Pollo Broaster', 'Frango empanado crocante estilo broaster', 39.90, 2),
+      (${m['Frango']}, 'Pollo al Horno', 'Frango assado no forno com tempero da casa', 41.90, 3),
+      (${m['Frango']}, '1/4 Pollo + Batata', 'Quarto de frango com porção de batata', 28.90, 4),
+      (${m['Bebidas']}, 'Coca-Cola Lata 350ml', 'Gelada', 7.00, 1),
+      (${m['Bebidas']}, 'Coca-Cola 2L', 'Garrafa 2 litros', 14.00, 2),
+      (${m['Bebidas']}, 'Fanta Lata 350ml', 'Laranja gelada', 7.00, 3),
+      (${m['Bebidas']}, 'Fanta 2L', 'Garrafa 2 litros', 13.00, 4),
+      (${m['Bebidas']}, 'Sprite Lata 350ml', 'Limão gelada', 7.00, 5),
+      (${m['Bebidas']}, 'Sprite 2L', 'Garrafa 2 litros', 13.00, 6)
     `;
   }
 }
