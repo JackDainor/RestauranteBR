@@ -4,8 +4,7 @@ import { ensureSchema } from '@/lib/schema';
 
 function authed(req: NextRequest) {
   const secret = process.env.OPERATOR_SECRET || '';
-  if (!secret) return false;
-  return (req.headers.get('x-admin-secret') || '') === secret;
+  return !!secret && (req.headers.get('x-admin-secret') || '') === secret;
 }
 
 export async function GET(req: NextRequest) {
@@ -30,12 +29,10 @@ export async function POST(req: NextRequest) {
     const db = sql();
 
     if (action === 'upsert_item') {
-      const id = b.id ? Number(b.id) : null;
       const name = String(b.name || '').trim();
       const price = Number(b.price);
-      if (!name || !(price >= 0)) {
-        return NextResponse.json({ error: 'Nome e preço obrigatórios' }, { status: 400 });
-      }
+      if (!name || !(price >= 0)) return NextResponse.json({ error: 'Nome e preço obrigatórios' }, { status: 400 });
+      const id = b.id ? Number(b.id) : null;
       if (id) {
         await db`
           UPDATE menu_items SET
@@ -45,29 +42,28 @@ export async function POST(req: NextRequest) {
             category_id = ${b.category_id ? Number(b.category_id) : null},
             image_url = ${b.image_url || null},
             active = ${b.active !== false},
+            sold_out = ${Boolean(b.sold_out)},
             sort_order = ${Number(b.sort_order) || 0}
           WHERE id = ${id}
         `;
       } else {
         await db`
-          INSERT INTO menu_items (category_id, name, description, price, image_url, active, sort_order)
+          INSERT INTO menu_items (category_id, name, description, price, image_url, active, sold_out, sort_order)
           VALUES (
             ${b.category_id ? Number(b.category_id) : null},
-            ${name},
-            ${String(b.description || '')},
-            ${price},
-            ${b.image_url || null},
-            ${b.active !== false},
-            ${Number(b.sort_order) || 0}
+            ${name}, ${String(b.description || '')}, ${price},
+            ${b.image_url || null}, true, false, ${Number(b.sort_order) || 0}
           )
         `;
       }
       return NextResponse.json({ success: true });
     }
 
-    if (action === 'toggle_item') {
+    if (action === 'set_flags') {
       const id = Number(b.id);
-      await db`UPDATE menu_items SET active = ${Boolean(b.active)} WHERE id = ${id}`;
+      if (b.active != null) await db`UPDATE menu_items SET active = ${Boolean(b.active)} WHERE id = ${id}`;
+      if (b.sold_out != null) await db`UPDATE menu_items SET sold_out = ${Boolean(b.sold_out)} WHERE id = ${id}`;
+      if (b.price != null) await db`UPDATE menu_items SET price = ${Number(b.price)} WHERE id = ${id}`;
       return NextResponse.json({ success: true });
     }
 
