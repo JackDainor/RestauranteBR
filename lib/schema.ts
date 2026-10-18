@@ -39,10 +39,14 @@ export async function ensureSchema() {
       price numeric NOT NULL,
       image_url text,
       active boolean NOT NULL DEFAULT true,
+      sold_out boolean NOT NULL DEFAULT false,
       sort_order int NOT NULL DEFAULT 0,
       created_at timestamptz NOT NULL DEFAULT now()
     )
   `;
+
+  // migrate sold_out if table existed without it
+  await db`ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS sold_out boolean NOT NULL DEFAULT false`;
 
   await db`
     CREATE TABLE IF NOT EXISTS orders (
@@ -51,7 +55,8 @@ export async function ensureSchema() {
       customer_id uuid REFERENCES customers(id),
       customer_name text NOT NULL,
       customer_whatsapp text NOT NULL,
-      address_text text NOT NULL,
+      address_text text,
+      fulfillment text NOT NULL DEFAULT 'delivery',
       items jsonb NOT NULL,
       subtotal numeric NOT NULL,
       delivery_fee numeric NOT NULL DEFAULT 0,
@@ -64,26 +69,32 @@ export async function ensureSchema() {
     )
   `;
 
-  // Seed default categories if empty
+  await db`ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment text NOT NULL DEFAULT 'delivery'`;
+  await db`ALTER TABLE orders ALTER COLUMN address_text DROP NOT NULL`;
+
   const cats = await db`SELECT id FROM menu_categories LIMIT 1`;
   if (!cats.length) {
     await db`INSERT INTO menu_categories (name, sort_order) VALUES
-      ('Lanches', 1),
-      ('Bebidas', 2),
-      ('Porções', 3),
-      ('Sobremesas', 4)`;
+      ('Hambúrgueres', 1),
+      ('Pizzas', 2),
+      ('Bebidas', 3),
+      ('Acompanhamentos', 4)`;
     const c = await db`SELECT id, name FROM menu_categories ORDER BY sort_order`;
-    const map: Record<string, number> = {};
-    for (const row of c as any[]) map[row.name] = row.id;
+    const m: Record<string, number> = {};
+    for (const row of c as any[]) m[row.name] = row.id;
     await db`
       INSERT INTO menu_items (category_id, name, description, price, sort_order) VALUES
-      (${map['Lanches']}, 'X-Burger', 'Pão, burger 180g, queijo, alface, tomate', 28.00, 1),
-      (${map['Lanches']}, 'X-Bacon', 'Burger, queijo, bacon crocante', 32.00, 2),
-      (${map['Lanches']}, 'X-Tudo', 'Completo com ovo, bacon, salada', 36.00, 3),
-      (${map['Bebidas']}, 'Refrigerante 350ml', 'Lata', 7.00, 1),
-      (${map['Bebidas']}, 'Suco natural 500ml', 'Laranja ou limão', 12.00, 2),
-      (${map['Porções']}, 'Batata frita G', 'Porção generosa', 22.00, 1),
-      (${map['Sobremesas']}, 'Brownie', 'Com calda de chocolate', 14.00, 1)
+      (${m['Hambúrgueres']}, 'Classic Burger', 'Blend 180g, queijo, alface, tomate, molho da casa', 29.90, 1),
+      (${m['Hambúrgueres']}, 'Bacon Smash', 'Dois smashes, cheddar e bacon crocante', 34.90, 2),
+      (${m['Hambúrgueres']}, 'Burger BBQ', 'Blend, onion rings e barbecue', 36.90, 3),
+      (${m['Pizzas']}, 'Mussarela G', 'Molho, mussarela e orégano', 49.90, 1),
+      (${m['Pizzas']}, 'Calabresa G', 'Calabresa fatiada e cebola', 54.90, 2),
+      (${m['Pizzas']}, 'Frango c/ Catupiry G', 'Frango desfiado e catupiry', 59.90, 3),
+      (${m['Bebidas']}, 'Refrigerante Lata', '350ml', 7.00, 1),
+      (${m['Bebidas']}, 'Refrigerante 2L', 'Diversos sabores', 14.00, 2),
+      (${m['Bebidas']}, 'Suco Natural', 'Laranja ou limão 500ml', 12.00, 3),
+      (${m['Acompanhamentos']}, 'Batata Frita G', 'Crocante com tempero', 22.00, 1),
+      (${m['Acompanhamentos']}, 'Onion Rings', 'Anéis empanados', 24.00, 2)
     `;
   }
 }
