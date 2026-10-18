@@ -1,7 +1,81 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureSchema, getSql } from '@/lib/db';
-export const runtime='nodejs';
-function authorized(r:NextRequest){return !!process.env.ADMIN_PASSWORD && r.headers.get('x-admin-password')===process.env.ADMIN_PASSWORD;}
-export async function POST(r:NextRequest){if(!authorized(r))return NextResponse.json({error:'Não autorizado'},{status:401});try{await ensureSchema();const b=await r.json();const id=String(b.id||crypto.randomUUID()).slice(0,80),name=String(b.name||'').trim(),description=String(b.description||'').trim(),category=String(b.category||'').trim(),price=Number(b.price),image=String(b.image||'🍽️').slice(0,500),available=b.available!==false;if(!name||!category||!Number.isFinite(price)||price<0)return NextResponse.json({error:'Nome, categoria e preço válido são obrigatórios.'},{status:400});const sql=getSql();const rows=await sql`INSERT INTO menu_items(id,name,description,category,price,image,available) VALUES (${id},${name},${description},${category},${price},${image},${available}) ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,category=EXCLUDED.category,price=EXCLUDED.price,image=EXCLUDED.image,available=EXCLUDED.available RETURNING *`;return NextResponse.json({item:rows[0]});}catch(e){console.error(e);return NextResponse.json({error:'Erro ao salvar produto.'},{status:500});}}
-export async function PATCH(r:NextRequest){if(!authorized(r))return NextResponse.json({error:'Não autorizado'},{status:401});try{await ensureSchema();const b=await r.json();const sql=getSql();const rows=await sql`UPDATE menu_items SET available=${!!b.available} WHERE id=${String(b.id)} RETURNING id,available`;if(!rows.length)return NextResponse.json({error:'Produto não encontrado.'},{status:404});return NextResponse.json({item:rows[0]});}catch{return NextResponse.json({error:'Erro ao atualizar produto.'},{status:500});}}
-export async function DELETE(r:NextRequest){if(!authorized(r))return NextResponse.json({error:'Não autorizado'},{status:401});try{const b=await r.json();const sql=getSql();await sql`DELETE FROM menu_items WHERE id=${String(b.id)}`;return NextResponse.json({ok:true});}catch{return NextResponse.json({error:'Erro ao remover produto.'},{status:500});}}
+import { sql } from '@/lib/db';
+import { ensureSchema } from '@/lib/schema';
+
+function authed(req: NextRequest) {
+  const secret = process.env.OPERATOR_SECRET || '';
+  return !!secret && (req.headers.get('x-admin-secret') || '') === secret;
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    if (!authed(req)) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+    await ensureSchema();
+    const db = sql();
+    const categories = await db`SELECT * FROM menu_categories ORDER BY sort_order, id`;
+    const items = await db`SELECT * FROM menu_items ORDER BY sort_order, id`;
+    return NextResponse.json({ success: true, categories, items });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    if (!authed(req)) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+    await ensureSchema();
+    const b = await req.json();
+    const action = String(b.action || '');
+    const db = sql();
+
+    if (action === 'upsert_item') {
+      const name = String(b.name || '').trim();
+      const price = Number(b.price);
+      if (!name || !(price >= 0)) return NextResponse.json({ error: 'Nome e preço obrigatórios' }, { status: 400 });
+      const id = b.id ? Number(b.id) : null;
+      if (id) {
+        await db`
+          UPDATE menu_items SET
+            name = ${name},
+            description = ${String(b.description || '')},
+            price = ${price},
+            category_id = ${b.category_id ? Number(b.category_id) : null},
+            image_url = ${b.image_url || null},
+            active = ${b.active !== false},
+            sold_out = ${Boolean(b.sold_out)},
+            sort_order = ${Number(b.sort_order) || 0}
+          WHERE id = ${id}
+        `;
+      } else {
+        await db`
+          INSERT INTO menu_items (category_id, name, description, price, image_url, active, sold_out, sort_order)
+          VALUES (
+            ${b.category_id ? Number(b.category_id) : null},
+            ${name}, ${String(b.description || '')}, ${price},
+            ${b.image_url || null}, true, false, ${Number(b.sort_order) || 0}
+          )
+        `;
+      }
+      return NextResponse.json({ success: true });
+    }
+
+    if (action === 'set_flags') {
+      const id = Number(b.id);
+      if (b.active != null) await db`UPDATE menu_items SET active = ${Boolean(b.active)} WHERE id = ${id}`;
+      if (b.sold_out != null) await db`UPDATE menu_items SET sold_out = ${Boolean(b.sold_out)} WHERE id = ${id}`;
+      if (b.price != null) await db`UPDATE menu_items SET price = ${Number(b.price)} WHERE id = ${id}`;
+      return NextResponse.json({ success: true });
+    }
+
+    if (action === 'add_category') {
+      const name = String(b.name || '').trim();
+      if (!name) return NextResponse.json({ error: 'Nome obrigatório' }, { status: 400 });
+      await db`INSERT INTO menu_categories (name, sort_order) VALUES (${name}, ${Number(b.sort_order) || 99})`;
+      return NextResponse.json({ success: true });
+    }
+
+    return NextResponse.json({ error: 'Ação desconhecida' }, { status: 400 });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
