@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1200" viewBox="0 0 1600 1200">
+  <defs>
+    <radialGradient id="d1" cx="15%" cy="0%" r="80%"><stop offset="0%" stop-color="#1a3d2e"/><stop offset="45%" stop-color="#0f1612"/><stop offset="100%" stop-color="#0a0c0b"/></radialGradient>
+    <radialGradient id="d2" cx="85%" cy="70%" r="55%"><stop offset="0%" stop-color="#d4f36a22"/><stop offset="100%" stop-color="#0000"/></radialGradient>
+    <pattern id="dotsd" width="32" height="32" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#d4f36a10"/></pattern>
+  </defs>
+  <rect width="1600" height="1200" fill="url(#d1)"/>
+  <rect width="1600" height="1200" fill="url(#d2)"/>
+  <rect width="1600" height="1200" fill="url(#dotsd)"/>
+  <ellipse cx="1200" cy="180" rx="300" ry="200" fill="#236b4c33"/>
+  <ellipse cx="180" cy="980" rx="340" ry="220" fill="#d4f36a0c"/>
+</svg>
