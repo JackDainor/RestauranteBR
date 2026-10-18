@@ -14,72 +14,63 @@ export async function POST(req: NextRequest) {
     const b = await req.json();
     const name = String(b.customerName || '').trim();
     const whatsapp = normWa(String(b.customerWhatsapp || ''));
+    const fulfillment = b.fulfillment === 'pickup' ? 'pickup' : 'delivery';
     const addressText = String(b.addressText || '').trim();
     const notes = String(b.notes || '').trim();
     const paymentMethod = String(b.paymentMethod || 'pix');
     const items = Array.isArray(b.items) ? b.items : [];
 
-    if (!name || whatsapp.length < 10 || !addressText || !items.length) {
-      return NextResponse.json({ error: 'Dados incompletos do pedido' }, { status: 400 });
+    if (!name || whatsapp.length < 10 || !items.length) {
+      return NextResponse.json({ error: 'Dados incompletos' }, { status: 400 });
+    }
+    if (fulfillment === 'delivery' && !addressText) {
+      return NextResponse.json({ error: 'Endereço obrigatório para delivery' }, { status: 400 });
     }
 
-    type Line = { id: number; name: string; qty: number; price: number };
-    const lines: Line[] = items.map((i: any) => ({
+    const lines = items.map((i: any) => ({
       id: Number(i.id),
       name: String(i.name),
       qty: Math.max(1, Number(i.qty) || 1),
       price: Number(i.price) || 0,
     }));
 
-    const subtotal = lines.reduce((s, i) => s + i.qty * i.price, 0);
-    const deliveryFee = Number(process.env.DELIVERY_FEE || 6);
-    const minOrder = Number(process.env.MIN_ORDER || 20);
+    const subtotal = lines.reduce((s: number, i: any) => s + i.qty * i.price, 0);
+    const deliveryFee = fulfillment === 'delivery' ? Number(process.env.DELIVERY_FEE || 8) : 0;
+    const minOrder = Number(process.env.MIN_ORDER || 25);
     if (subtotal < minOrder) {
-      return NextResponse.json(
-        { error: `Pedido mínimo de R$ ${minOrder.toFixed(2)} (sem taxa de entrega)` },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: `Pedido mínimo R$ ${minOrder.toFixed(2)}` }, { status: 400 });
     }
     const total = subtotal + deliveryFee;
 
     const db = sql();
-    // upsert customer lightly
-    let customerId: string | null = null;
     const existing = await db`SELECT id FROM customers WHERE whatsapp = ${whatsapp} LIMIT 1`;
-    if (existing[0]) customerId = existing[0].id;
-
+    const customerId = existing[0]?.id || null;
     const id = randomUUID();
+
     const rows = await db`
       INSERT INTO orders (
-        id, customer_id, customer_name, customer_whatsapp, address_text,
+        id, customer_id, customer_name, customer_whatsapp, address_text, fulfillment,
         items, subtotal, delivery_fee, total, payment_method, status, notes
       ) VALUES (
-        ${id}::uuid,
-        ${customerId}::uuid,
-        ${name},
-        ${whatsapp},
-        ${addressText},
+        ${id}::uuid, ${customerId}::uuid, ${name}, ${whatsapp},
+        ${fulfillment === 'delivery' ? addressText : 'Retirada no balcão'},
+        ${fulfillment},
         ${JSON.stringify(lines)}::jsonb,
-        ${subtotal},
-        ${deliveryFee},
-        ${total},
-        ${paymentMethod},
-        'new',
-        ${notes || null}
+        ${subtotal}, ${deliveryFee}, ${total}, ${paymentMethod}, 'new', ${notes || null}
       )
-      RETURNING id, order_number, status, total, created_at
+      RETURNING id, order_number, status, total
     `;
     const order = rows[0];
-    const restaurant = process.env.RESTAURANT_NAME || 'Meu Restaurante';
+    const restaurant = process.env.RESTAURANT_NAME || 'Sabor & Fogo';
+    const mode = fulfillment === 'pickup' ? '🏍 RETIRADA' : '🚚 DELIVERY';
 
-    const telegramText =
-      `🍽 <b>Novo pedido #${order.order_number}</b>\n` +
-      `${name} · ${whatsapp}\n` +
-      lines.map((i) => `${i.qty}x ${i.name}`).join('\n') +
-      `\nTotal: R$ ${total.toFixed(2)} (${paymentMethod})\n` +
-      `📍 ${addressText}`;
-
-    await notifyTelegram(telegramText);
+    await notifyTelegram(
+      `${mode} <b>#${order.order_number}</b>\n` +
+        `${name} · ${whatsapp}\n` +
+        lines.map((i: any) => `${i.qty}x ${i.name}`).join('\n') +
+        `\nTotal: R$ ${total.toFixed(2)} (${paymentMethod})\n` +
+        (fulfillment === 'delivery' ? `📍 ${addressText}` : 'Retirada no restaurante')
+    );
 
     const clientMsg = formatOrderMessage({
       restaurant,
@@ -89,20 +80,15 @@ export async function POST(req: NextRequest) {
       subtotal,
       deliveryFee,
       total,
-      address: addressText,
-      statusLabel: 'Recebido — em breve preparamos',
+      address: fulfillment === 'delivery' ? addressText : 'Retirada no restaurante',
+      statusLabel: 'Pedido recebido',
     });
 
     const waApi = await notifyWhatsApp(whatsapp, clientMsg);
 
     return NextResponse.json({
       success: true,
-      order: {
-        id: order.id,
-        orderNumber: order.order_number,
-        total,
-        status: order.status,
-      },
+      order: { id: order.id, orderNumber: order.order_number, total, status: order.status },
       customerWhatsAppLink: waMeLink(whatsapp, clientMsg),
       whatsappApiSent: waApi.ok,
       pixKey: process.env.PIX_KEY || null,
