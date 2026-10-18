@@ -1,19 +1,22 @@
-# Restaurante Delivery (Brasil)
+# Sabor & Fogo — Delivery (Brasil)
 
-Next.js + Vercel + Neon.
-
-## Funcionalidades
-- Cardápio público com carrinho
-- Cliente: nome, WhatsApp, endereço (salvo por WhatsApp)
-- 2ª compra: confirmar ou editar endereço
-- Pedido → Telegram ao restaurante
-- Status no admin → mensagem WhatsApp ao cliente (API se configurada, ou link wa.me)
-- Pix (chave/QR por variáveis) ou dinheiro na entrega
-- Admin: pedidos + editar cardápio
+Next.js + Vercel + Neon. Cardápio animado, carrinho, delivery/retirada, Pix/cartão/dinheiro, admin, Telegram, WhatsApp.
 
 ## Variáveis Vercel
-Ver `.env.example`
+DATABASE_URL (Secret)
+OPERATOR_SECRET (Secret)
+RESTAURANT_NAME
+RESTAURANT_WHATSAPP
+DELIVERY_FEE
+MIN_ORDER
+PIX_KEY (Secret)
+PIX_QR_URL
+TELEGRAM_BOT_TOKEN (Secret)
+TELEGRAM_CHAT_ID (Secret)
+WHATSAPP_TOKEN (opcional)
+WHATSAPP_PHONE_ID (opcional)
+CARD_NOTE
 
 ## URLs
-- Site: /
-- Admin: /admin (senha = OPERATOR_SECRET)
+/ — loja
+/admin — painel
