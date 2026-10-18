@@ -1,100 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { randomUUID } from 'crypto';
-import { sql } from '@/lib/db';
-import { ensureSchema } from '@/lib/schema';
-import { formatOrderMessage, notifyTelegram, notifyWhatsApp, waMeLink } from '@/lib/notify';
-
-function normWa(w: string) {
-  return w.replace(/\D/g, '');
-}
-
+import { randomUUID } from 'node:crypto';
+import { ensureSchema, getSql } from '@/lib/db';
+export const runtime = 'nodejs';
+type Line = {id:string; quantity:number};
 export async function POST(req: NextRequest) {
-  try {
-    await ensureSchema();
-    const b = await req.json();
-    const name = String(b.customerName || '').trim();
-    const whatsapp = normWa(String(b.customerWhatsapp || ''));
-    const fulfillment = b.fulfillment === 'pickup' ? 'pickup' : 'delivery';
-    const addressText = String(b.addressText || '').trim();
-    const notes = String(b.notes || '').trim();
-    const paymentMethod = String(b.paymentMethod || 'pix');
-    const items = Array.isArray(b.items) ? b.items : [];
-
-    if (!name || whatsapp.length < 10 || !items.length) {
-      return NextResponse.json({ error: 'Dados incompletos' }, { status: 400 });
-    }
-    if (fulfillment === 'delivery' && !addressText) {
-      return NextResponse.json({ error: 'Endereço obrigatório para delivery' }, { status: 400 });
-    }
-
-    const lines = items.map((i: any) => ({
-      id: Number(i.id),
-      name: String(i.name),
-      qty: Math.max(1, Number(i.qty) || 1),
-      price: Number(i.price) || 0,
-    }));
-
-    const subtotal = lines.reduce((s: number, i: any) => s + i.qty * i.price, 0);
-    const deliveryFee = fulfillment === 'delivery' ? Number(process.env.DELIVERY_FEE || 8) : 0;
-    const minOrder = Number(process.env.MIN_ORDER || 25);
-    if (subtotal < minOrder) {
-      return NextResponse.json({ error: `Pedido mínimo R$ ${minOrder.toFixed(2)}` }, { status: 400 });
-    }
-    const total = subtotal + deliveryFee;
-
-    const db = sql();
-    const existing = await db`SELECT id FROM customers WHERE whatsapp = ${whatsapp} LIMIT 1`;
-    const customerId = existing[0]?.id || null;
-    const id = randomUUID();
-
-    const rows = await db`
-      INSERT INTO orders (
-        id, customer_id, customer_name, customer_whatsapp, address_text, fulfillment,
-        items, subtotal, delivery_fee, total, payment_method, status, notes
-      ) VALUES (
-        ${id}::uuid, ${customerId}::uuid, ${name}, ${whatsapp},
-        ${fulfillment === 'delivery' ? addressText : 'Retirada no balcão'},
-        ${fulfillment},
-        ${JSON.stringify(lines)}::jsonb,
-        ${subtotal}, ${deliveryFee}, ${total}, ${paymentMethod}, 'new', ${notes || null}
-      )
-      RETURNING id, order_number, status, total
-    `;
-    const order = rows[0];
-    const restaurant = process.env.RESTAURANT_NAME || 'Sabor & Fogo';
-    const mode = fulfillment === 'pickup' ? '🏍 RETIRADA' : '🚚 DELIVERY';
-
-    await notifyTelegram(
-      `${mode} <b>#${order.order_number}</b>\n` +
-        `${name} · ${whatsapp}\n` +
-        lines.map((i: any) => `${i.qty}x ${i.name}`).join('\n') +
-        `\nTotal: R$ ${total.toFixed(2)} (${paymentMethod})\n` +
-        (fulfillment === 'delivery' ? `📍 ${addressText}` : 'Retirada no restaurante')
-    );
-
-    const clientMsg = formatOrderMessage({
-      restaurant,
-      orderNumber: order.order_number,
-      customerName: name,
-      items: lines,
-      subtotal,
-      deliveryFee,
-      total,
-      address: fulfillment === 'delivery' ? addressText : 'Retirada no restaurante',
-      statusLabel: 'Pedido recebido',
-    });
-
-    const waApi = await notifyWhatsApp(whatsapp, clientMsg);
-
-    return NextResponse.json({
-      success: true,
-      order: { id: order.id, orderNumber: order.order_number, total, status: order.status },
-      customerWhatsAppLink: waMeLink(whatsapp, clientMsg),
-      whatsappApiSent: waApi.ok,
-      pixKey: process.env.PIX_KEY || null,
-      pixQrUrl: process.env.PIX_QR_URL || null,
-    });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message || 'Erro ao criar pedido' }, { status: 500 });
-  }
+ try {
+  await ensureSchema(); const body = await req.json();
+  const name=String(body.name||'').trim().slice(0,100), whatsapp=String(body.whatsapp||'').replace(/[^\d+]/g,'').slice(0,20), address=String(body.address||'').trim().slice(0,300);
+  const fulfillment=body.fulfillment==='retirada'?'retirada':'delivery';
+  const payment=String(body.paymentMethod||''); const allowed=['pix','pix_key','credit_card','debit_card'];
+  const lines:Line[]=Array.isArray(body.items)?body.items:[];
+  if(name.length<2||whatsapp.replace(/\D/g,'').length<8) return NextResponse.json({error:'Informe nome e WhatsApp válidos.'},{status:400});
+  if(fulfillment==='delivery'&&address.length<5) return NextResponse.json({error:'Informe o endereço completo para entrega.'},{status:400});
+  if(!allowed.includes(payment)) return NextResponse.json({error:'Selecione um método de pagamento.'},{status:400});
+  if(!lines.length||lines.length>40) return NextResponse.json({error:'Carrinho vazio ou inválido.'},{status:400});
+  const sql=getSql(); const ids=[...new Set(lines.map(x=>String(x.id)))];
+  const products=await sql`SELECT id,name,price::float AS price,available FROM menu_items WHERE id = ANY(${ids})`;
+  const normalized=lines.map(line=>{const p=products.find((x:any)=>x.id===line.id);const q=Math.floor(Number(line.quantity));if(!p||!p.available||!Number.isFinite(q)||q<1||q>50)throw new Error('Um produto não está disponível ou a quantidade é inválida.');return {id:p.id,name:p.name,price:Number(p.price),quantity:q,lineTotal:Number(p.price)*q};});
+  const subtotal=normalized.reduce((s,x)=>s+x.lineTotal,0);const fee=fulfillment==='delivery'?Math.max(0,Number(process.env.NEXT_PUBLIC_DELIVERY_FEE||5)):0;const total=Number((subtotal+fee).toFixed(2));
+  const cust=await sql`INSERT INTO customers(name,whatsapp,address,updated_at) VALUES (${name},${whatsapp},${address},NOW()) ON CONFLICT (whatsapp) DO UPDATE SET name=EXCLUDED.name,address=EXCLUDED.address,updated_at=NOW() RETURNING id`;
+  const id=randomUUID(); const pixKey=payment==='pix_key'?(process.env.NEXT_PUBLIC_PIX_KEY||''):'';
+  await sql`INSERT INTO orders(id,customer_id,customer_name,whatsapp,address,fulfillment,payment_method,pix_key,items,subtotal,delivery_fee,total,status) VALUES (${id},${cust[0].id},${name},${whatsapp},${address},${fulfillment},${payment},${pixKey},${JSON.stringify(normalized)},${subtotal},${fee},${total},'Recebido')`;
+  return NextResponse.json({order:{id,name,total,status:'Recebido',paymentMethod:payment,pixKey,items:normalized,fulfillment},message:'Pedido registrado. O pagamento ainda não foi processado.'},{status:201});
+ } catch(e) { console.error('order POST',e);return NextResponse.json({error:e instanceof Error?e.message:'Não foi possível registrar o pedido.'},{status:400}); }
 }
