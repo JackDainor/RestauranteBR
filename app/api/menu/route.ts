@@ -10,21 +10,23 @@ export async function GET() {
       SELECT id, name, sort_order FROM menu_categories WHERE active = true ORDER BY sort_order, id
     `;
     const items = await db`
-      SELECT id, category_id, name, description, price::float8 AS price, image_url, sort_order
+      SELECT id, category_id, name, description, price::float8 AS price,
+             image_url, sold_out, sort_order
       FROM menu_items WHERE active = true ORDER BY sort_order, id
     `;
     return NextResponse.json({
       success: true,
       categories,
       items,
-      restaurant: process.env.RESTAURANT_NAME || 'Meu Restaurante',
-      deliveryFee: Number(process.env.DELIVERY_FEE || 6),
-      minOrder: Number(process.env.MIN_ORDER || 20),
+      restaurant: process.env.RESTAURANT_NAME || 'Sabor & Fogo',
+      deliveryFee: Number(process.env.DELIVERY_FEE || 8),
+      minOrder: Number(process.env.MIN_ORDER || 25),
       pixKey: process.env.PIX_KEY || null,
       pixQrUrl: process.env.PIX_QR_URL || null,
+      cardNote: process.env.CARD_NOTE || 'Cartão na entrega',
       restaurantWhatsapp: process.env.RESTAURANT_WHATSAPP || null,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message || 'Erro ao carregar cardápio' }, { status: 500 });
+    return NextResponse.json({ error: e.message || 'Erro cardápio' }, { status: 500 });
   }
 }
